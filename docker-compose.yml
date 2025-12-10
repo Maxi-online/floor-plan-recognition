@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  floor-plan-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: floor-plan-recognition:latest
+    container_name: floor-plan-service
+    
+    # Порты для всех сервисов
+    ports:
+      - "8001:8001"  # Cleanup Service
+      - "8002:8002"  # OCR Service
+      - "8003:8003"  # Hybrid Service (main)
+    
+    # Environment variables
+    environment:
+      - PORT_CLEANUP=8001
+      - PORT_OCR=8002
+      - PORT_HYBRID=8003
+      - PYTHONUNBUFFERED=1
+    
+    # Volumes для персистентности данных
+    volumes:
+      # Конфигурация с токеном (можно изменить без пересборки образа)
+      - ./settings_secret.json:/app/settings_secret.json:ro
+      
+      # Кэш моделей (чтобы не скачивать при каждом перезапуске)
+      - model-cache:/root/.cache/torch
+      - easyocr-cache:/root/.EasyOCR
+    
+    # Ресурсы (опционально, раскомментировать при необходимости)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '4'
+    #       memory: 8G
+    #     reservations:
+    #       cpus: '2'
+    #       memory: 4G
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Логирование
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8003/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# Volumes для кэша моделей
+volumes:
+  model-cache:
+    driver: local
+  easyocr-cache:
+    driver: local
+
+# Networks (опционально, если нужна изоляция)
+networks:
+  default:
+    name: floor-plan-network
+

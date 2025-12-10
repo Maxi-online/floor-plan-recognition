@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+room_env/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Документация и тесты
+*.md
+README.md
+TESTING.md
+test_*.py
+tests/
+
+# Временные файлы
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Inputs/Outputs (добавляются через volume если нужны)
+inputs/
+outputs/
+results/
+*.json
+!settings_secret.json
+!requirements.txt
+
+# Модели (кроме основных весов)
+models/*
+!models/.gitkeep
+*.pt
+!sam2.1_l.pt
+
+# Прочее
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
