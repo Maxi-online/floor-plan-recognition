@@ -36,9 +36,6 @@ COPY settings_secret.json .
 # Создание директории для весов моделей
 RUN mkdir -p /app/models
 
-# Копирование весов SAM2 если есть (опционально, иначе скачается автоматически)
-COPY sam2.1_l.pt ./sam2.1_l.pt 2>/dev/null || true
-
 # Expose портов для сервисов
 EXPOSE 8001 8002 8003
 
