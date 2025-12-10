@@ -40,7 +40,7 @@ env/
 Thumbs.db
 
 # Project specific
-settings_secret.json
+# settings_secret.json - теперь в репозитории
 *.log
 *.tmp
 
