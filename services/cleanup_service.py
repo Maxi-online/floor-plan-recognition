@@ -1,19 +1,18 @@
 """Floorplan Cleanup Service.
 
-Сервис предобработки изображений планов помещений.
-Выполняет коррекцию перспективы, шумоподавление и бинаризацию
-для улучшения качества последующего распознавания.
+Preprocessing service for floor plan images.
+Performs perspective correction, denoising, and binarization
+to improve subsequent recognition quality.
 
-Основные возможности:
-    - Автоматическая коррекция перспективы (perspective transform)
-    - Детекция и выравнивание четырёхугольников (планы, сфотографированные под углом)
-    - Шумоподавление (fastNlMeansDenoising)
-    - Адаптивная бинаризация для удаления артефактов
+Main features:
+    - Automatic perspective correction (perspective transform)
+    - Detection and alignment of quadrilaterals (plans photographed at an angle)
+    - Denoising (fastNlMeansDenoising)
+    - Adaptive binarization for artifact removal
 
-Автор: Стреколовский Максим Владимирович
-Заказчик: ООО Refloor
-Дата: 10.12.2025
-Версия: 0.1.0
+Author: Maksim Strekolovsky
+Date: 10.12.2025
+Version: 0.1.0
 """
 import io
 import os
@@ -29,18 +28,18 @@ app = FastAPI(title="Floorplan Cleanup Service", version="0.1.0")
 
 
 def largest_quadrilateral(mask: np.ndarray) -> Tuple[np.ndarray, float]:
-    """Поиск самого большого четырёхугольника на изображении.
+    """Find the largest quadrilateral in the image.
     
-    Находит все контуры на бинарной маске, аппроксимирует их
-    и возвращает самый большой четырёхугольник (план, сфотографированный под углом).
+    Finds all contours on binary mask, approximates them
+    and returns the largest quadrilateral (plan photographed at an angle).
     
     Args:
-        mask: Бинарная маска (255 = объект, 0 = фон)
+        mask: Binary mask (255 = object, 0 = background)
         
     Returns:
-        Tuple[np.ndarray, float]: Кортеж из:
-            - Массив 4 точек четырёхугольника или None
-            - Площадь четырёхугольника
+        Tuple[np.ndarray, float]: Tuple of:
+            - Array of 4 quadrilateral points or None
+            - Quadrilateral area
     """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     best = None
@@ -57,24 +56,24 @@ def largest_quadrilateral(mask: np.ndarray) -> Tuple[np.ndarray, float]:
 
 
 def warp_perspective(image: np.ndarray) -> np.ndarray:
-    """Коррекция перспективы плана (выравнивание четырёхугольника).
+    """Plan perspective correction (quadrilateral alignment).
     
-    Автоматически находит самый большой четырёхугольник на изображении
-    (предполагается что это план) и применяет perspective transform
-    для выравнивания в прямоугольник.
+    Automatically finds the largest quadrilateral in the image
+    (assumed to be the plan) and applies perspective transform
+    to align it into a rectangle.
     
-    Алгоритм:
-    1. Конвертация в grayscale и бинаризация (Otsu)
-    2. Поиск самого большого четырёхугольника
-    3. Упорядочивание углов (top-left, top-right, bottom-right, bottom-left)
-    4. Вычисление размеров выходного прямоугольника
-    5. Применение perspective transform
+    Algorithm:
+    1. Convert to grayscale and binarize (Otsu)
+    2. Find largest quadrilateral
+    3. Order corners (top-left, top-right, bottom-right, bottom-left)
+    4. Calculate output rectangle dimensions
+    5. Apply perspective transform
     
     Args:
-        image: Входное изображение в BGR формате
+        image: Input image in BGR format
         
     Returns:
-        np.ndarray: Выровненное изображение или оригинал если четырёхугольник не найден
+        np.ndarray: Aligned image or original if quadrilateral not found
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -108,22 +107,22 @@ def warp_perspective(image: np.ndarray) -> np.ndarray:
 
 
 def despeckle(image: np.ndarray) -> np.ndarray:
-    """Удаление шума и артефактов с изображения.
+    """Remove noise and artifacts from image.
     
-    Применяет адаптивную бинаризацию и морфологические операции
-    для удаления мелких точек, пятен и других артефактов.
+    Applies adaptive binarization and morphological operations
+    to remove small dots, spots, and other artifacts.
     
     Pipeline:
-    1. Gaussian blur для сглаживания
-    2. Adaptive thresholding для бинаризации
-    3. Morphological opening для удаления мелких объектов
-    4. Morphological closing для заполнения разрывов
+    1. Gaussian blur for smoothing
+    2. Adaptive thresholding for binarization
+    3. Morphological opening to remove small objects
+    4. Morphological closing to fill gaps
     
     Args:
-        image: Входное изображение в BGR формате
+        image: Input image in BGR format
         
     Returns:
-        np.ndarray: Бинарное изображение без шума (255 = объект, 0 = фон)
+        np.ndarray: Binary image without noise (255 = object, 0 = background)
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -137,39 +136,39 @@ def despeckle(image: np.ndarray) -> np.ndarray:
 
 
 def clean_image(file_bytes: bytes) -> bytes:
-    """Полный pipeline очистки изображения плана.
+    """Full floor plan image cleanup pipeline.
     
-    Выполняет все этапы предобработки:
-    1. Декодирование изображения
-    2. Коррекция перспективы
-    3. Шумоподавление (Non-Local Means Denoising)
-    4. Бинаризация и удаление артефактов
-    5. Кодирование в PNG
+    Performs all preprocessing stages:
+    1. Image decoding
+    2. Perspective correction
+    3. Denoising (Non-Local Means Denoising)
+    4. Binarization and artifact removal
+    5. PNG encoding
     
     Args:
-        file_bytes: Байты изображения (JPG/PNG)
+        file_bytes: Image bytes (JPG/PNG)
         
     Returns:
-        bytes: Обработанное бинарное изображение в PNG формате
+        bytes: Processed binary image in PNG format
         
     Raises:
-        ValueError: Если изображение невалидно или ошибка кодирования
+        ValueError: If image is invalid or encoding error
     """
     data = np.frombuffer(file_bytes, np.uint8)
     bgr = cv2.imdecode(data, cv2.IMREAD_COLOR)
     if bgr is None:
-        raise ValueError("Невозможно прочитать изображение")
+        raise ValueError("Cannot read image")
     warped = warp_perspective(bgr)
     denoised = cv2.fastNlMeansDenoisingColored(warped, None, 10, 10, 7, 21)
     bin_mask = despeckle(denoised)
-    # Возвращаем бинарное изображение, пригодное для последующего пайплайна
+    # Return binary image suitable for subsequent pipeline
     ok, buf = cv2.imencode(".png", bin_mask)
     if not ok:
-        raise ValueError("Ошибка кодирования PNG")
+        raise ValueError("PNG encoding error")
     return buf.tobytes()
 
 
-@app.post("/clean", summary="Нормализация перспективы и шумоподавление")
+@app.post("/clean", summary="Perspective normalization and denoising")
 async def clean_endpoint(file: UploadFile = File(...)):
     try:
         content = await file.read()

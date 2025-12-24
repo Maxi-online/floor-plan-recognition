@@ -1,18 +1,17 @@
 """Floor Plan Recognition Service.
 
-Гибридный сервис для распознавания планов помещений.
-Использует SAM 2.1 Large для сегментации комнат и Hough Transform для детекции стен.
+Hybrid service for floor plan recognition.
+Uses SAM 2.1 Large for room segmentation and Hough Transform for wall detection.
 
-Основные компоненты:
-    - Препроцессинг изображений (CLAHE, bilateral filter, Otsu+Adaptive thresholding)
-    - Детекция стен через Probabilistic Hough Transform
-    - Детекция комнат через OCR площадей + Watershed
-    - Fallback детекция через SAM 2.1 Large
+Main components:
+    - Image preprocessing (CLAHE, bilateral filter, Otsu+Adaptive thresholding)
+    - Wall detection via Probabilistic Hough Transform
+    - Room detection via OCR areas + Watershed
+    - Fallback detection via SAM 2.1 Large
 
-Автор: Стреколовский Максим Владимирович
-Заказчик: ООО Refloor
-Дата: 10.12.2025
-Версия: 1.0
+Author: Maksim Strekolovsky
+Date: 10.12.2025
+Version: 1.0
 """
 import os
 from pathlib import Path
@@ -23,7 +22,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import ORJSONResponse
 import orjson
 
-# SAM 2 imports via Ultralytics (автоматическая загрузка весов)
+# SAM 2 imports via Ultralytics (automatic weight loading)
 try:
     from ultralytics import SAM
     SAM2_AVAILABLE = True
@@ -38,17 +37,17 @@ sam_model = None
 
 
 def init_sam2():
-    """Инициализация модели SAM 2.1 Large.
+    """Initialize SAM 2.1 Large model.
     
-    Загружает предобученную модель SAM 2.1 Large для автоматической сегментации.
-    Веса модели (224MB) скачиваются автоматически при первом запуске
-    и кэшируются локально для последующих использований.
+    Loads pretrained SAM 2.1 Large model for automatic segmentation.
+    Model weights (224MB) are downloaded automatically on first run
+    and cached locally for subsequent uses.
     
     Returns:
-        SAM: Инициализированная модель SAM 2.1 Large или None при ошибке
+        SAM: Initialized SAM 2.1 Large model or None on error
         
     Raises:
-        Exception: Если модель недоступна или произошла ошибка инициализации
+        Exception: If model unavailable or initialization error
     """
     global sam_model
     
@@ -57,10 +56,10 @@ def init_sam2():
         return None
     
     try:
-        # SAM 2.1 Large (224MB) - МАКСИМАЛЬНАЯ точность (latest 2024)
-        # Веса скачаются автоматически при первом запуске, потом будут в кэше
+        # SAM 2.1 Large (224MB) - MAXIMUM accuracy (latest 2024)
+        # Weights will be downloaded automatically on first run, then cached
         sam_model = SAM('sam2.1_l.pt')
-        print(f"✅ SAM 2.1 Large initialized (максимальная точность)")
+        print(f"✅ SAM 2.1 Large initialized (maximum accuracy)")
         return sam_model
     except Exception as e:
         print(f"❌ SAM2 init failed: {e}")
@@ -68,19 +67,19 @@ def init_sam2():
 
 
 def preprocess(image: np.ndarray) -> np.ndarray:
-    """Продвинутая предобработка изображения плана.
+    """Advanced floor plan image preprocessing.
     
-    Применяет многоступенчатую обработку для улучшения качества распознавания:
-    1. CLAHE (Contrast Limited Adaptive Histogram Equalization) для усиления контраста
-    2. Bilateral filter для сглаживания с сохранением границ
-    3. Бинаризация через комбинацию Otsu и Adaptive thresholding
-    4. Морфологические операции для удаления шума
+    Applies multi-stage processing to improve recognition quality:
+    1. CLAHE (Contrast Limited Adaptive Histogram Equalization) for contrast enhancement
+    2. Bilateral filter for edge-preserving smoothing
+    3. Binarization via combination of Otsu and Adaptive thresholding
+    4. Morphological operations for noise removal
     
     Args:
-        image: Входное изображение в BGR или grayscale формате
+        image: Input image in BGR or grayscale format
         
     Returns:
-        np.ndarray: Бинаризованное изображение (255 = объект, 0 = фон)
+        np.ndarray: Binary image (255 = object, 0 = background)
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
     
@@ -105,49 +104,49 @@ def preprocess(image: np.ndarray) -> np.ndarray:
 
 
 def detect_walls(binary: np.ndarray) -> List[Dict]:
-    """Детекция стен на плане помещения.
+    """Wall detection on floor plan.
     
-    Использует агрессивный Probabilistic Hough Transform для детекции
-    всех линий на плане (внешние и внутренние стены).
+    Uses aggressive Probabilistic Hough Transform to detect
+    all lines on the plan (exterior and interior walls).
     
-    Алгоритм:
-    1. Скелетизация бинарного изображения (scikit-image thin)
-    2. Probabilistic Hough Transform с низкими порогами
-    3. Snap to axis (выравнивание по 0°/45°/90°/135°)
-    4. Удаление дубликатов
-    5. Слияние коллинеарных сегментов
+    Algorithm:
+    1. Binary image skeletonization (scikit-image thin)
+    2. Probabilistic Hough Transform with low thresholds
+    3. Snap to axis (alignment to 0°/45°/90°/135°)
+    4. Duplicate removal
+    5. Collinear segment merging
     
     Args:
-        binary: Бинаризованное изображение плана (255 = объект, 0 = фон)
+        binary: Binary floor plan image (255 = object, 0 = background)
         
     Returns:
-        List[Dict]: Список стен, каждая стена - dict с ключами:
-            - "id": str, уникальный идентификатор (например, "w1")
-            - "points": List[[x, y]], координаты концов стены в пикселях
+        List[Dict]: List of walls, each wall is a dict with keys:
+            - "id": str, unique identifier (e.g., "w1")
+            - "points": List[[x, y]], wall endpoint coordinates in pixels
     """
-    # Работаем с инвертированным изображением (стены = черные линии)
+    # Work with inverted image (walls = black lines)
     from skimage.morphology import thin
     skeleton = (thin(binary == 0) * 255).astype(np.uint8)
     
-    # АГРЕССИВНЫЙ Hough для захвата ВСЕХ линий (включая внутренние стены)
+    # AGGRESSIVE Hough to capture ALL lines (including interior walls)
     lines = cv2.HoughLinesP(
         skeleton, 
         rho=1, 
         theta=np.pi/180, 
-        threshold=30,      # СНИЖЕН для внутренних стен
-        minLineLength=20,  # СНИЖЕН для коротких стен
-        maxLineGap=35      # УВЕЛИЧЕН для соединения разрывов
+        threshold=30,      # LOWERED for interior walls
+        minLineLength=20,  # LOWERED for short walls
+        maxLineGap=35      # INCREASED to connect breaks
     )
     
     segments = []
     if lines is not None:
         for x1, y1, x2, y2 in lines[:, 0]:
             length = np.hypot(x2 - x1, y2 - y1)
-            if length >= 15:  # Минимум 15px (захватываем короткие внутренние стены)
+            if length >= 15:  # Minimum 15px (capture short interior walls)
                 x1, y1, x2, y2 = snap_to_axis(x1, y1, x2, y2)
                 segments.append({"points": [[int(x1), int(y1)], [int(x2), int(y2)]]})
     
-    # Удаляем дубликаты
+    # Remove duplicates
     unique_segments = []
     for seg in segments:
         is_duplicate = False
@@ -160,7 +159,7 @@ def detect_walls(binary: np.ndarray) -> List[Dict]:
         if not is_duplicate:
             unique_segments.append(seg)
     
-    # Merge collinear (агрессивно для объединения фрагментированных стен)
+    # Merge collinear (aggressively to merge fragmented walls)
     merged = merge_segments(unique_segments, max_angle=3.0, max_gap=50.0)
     
     print(f"🔴 Detected {len(merged)} walls (after merging from {len(unique_segments)} segments)")
@@ -168,39 +167,39 @@ def detect_walls(binary: np.ndarray) -> List[Dict]:
 
 
 def detect_rooms_sam2(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
-    """Детекция комнат через SAM 2.1 Large с многослойной фильтрацией.
+    """Room detection via SAM 2.1 Large with multi-layer filtering.
     
-    Использует автоматическую сегментацию SAM2 для поиска крупных областей (комнат)
-    с последующей строгой фильтрацией для исключения мебели, текста и других объектов.
+    Uses SAM2 automatic segmentation to find large areas (rooms)
+    with strict filtering to exclude furniture, text, and other objects.
     
-    Фильтры:
-    1. Площадь маски: 3000 < area < 60% изображения
-    2. Минимальная площадь контура: > 4000 пикселей
-    3. Aspect ratio: < 5 (не вытянутые объекты)
-    4. Solidity: > 0.75 (компактные формы)
-    5. Количество углов: 3-12 (многоугольники)
+    Filters:
+    1. Mask area: 3000 < area < 60% of image
+    2. Minimum contour area: > 4000 pixels
+    3. Aspect ratio: < 5 (not elongated objects)
+    4. Solidity: > 0.75 (compact shapes)
+    5. Number of corners: 3-12 (polygons)
     
     Args:
-        image: Оригинальное цветное изображение в BGR формате
-        binary: Бинаризованное изображение (не используется напрямую)
+        image: Original color image in BGR format
+        binary: Binary image (not used directly)
         
     Returns:
-        List[Dict]: Список комнат с полигонами, площадями и confidence scores
+        List[Dict]: List of rooms with polygons, areas, and confidence scores
         
     Note:
-        Используется как fallback если OCR нашел < 5 комнат
+        Used as fallback if OCR found < 5 rooms
     """
     if sam_model is None:
         return detect_rooms_fallback(binary)
     
     try:
-        # SAM2 автоматическая сегментация с параметрами для крупных объектов
+        # SAM2 automatic segmentation with parameters for large objects
         results = sam_model(
             image, 
             retina_masks=True,
             imgsz=1024,
-            conf=0.4,  # Снижен порог для захвата всех комнат
-            iou=0.9,   # Высокий IOU чтобы не объединять соседние комнаты
+            conf=0.4,  # Lowered threshold to capture all rooms
+            iou=0.9,   # High IOU to avoid merging adjacent rooms
         )
         
         all_masks = []
@@ -212,11 +211,11 @@ def detect_rooms_sam2(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
                 mask_np = mask.cpu().numpy() if hasattr(mask, 'cpu') else mask
                 mask_uint8 = (mask_np * 255).astype(np.uint8)
                 
-                # Сразу проверяем размер маски
+                # Check mask size immediately
                 area = cv2.countNonZero(mask_uint8)
                 img_area = mask_uint8.shape[0] * mask_uint8.shape[1]
                 
-                # ФИЛЬТР: средние и большие области (комнаты), не мебель и не вся квартира
+                # FILTER: medium and large areas (rooms), not furniture and not entire apartment
                 if area < 3000 or area > img_area * 0.6:
                     continue
                 
@@ -229,7 +228,7 @@ def detect_rooms_sam2(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
         
         print(f"📊 SAM2 found {len(all_masks)} large areas (potential rooms)")
         
-        # Конвертируем маски в полигоны с УМНОЙ фильтрацией
+        # Convert masks to polygons with SMART filtering
         rooms = []
         for mask_data in all_masks:
             mask = mask_data["mask"]
@@ -238,31 +237,31 @@ def detect_rooms_sam2(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
             for contour in contours:
                 area = cv2.contourArea(contour)
                 
-                # Фильтр 1: Минимальная площадь (НЕ мебель)
+                # Filter 1: Minimum area (NOT furniture)
                 if area < 4000:
                     continue
                 
-                # Фильтр 2: Aspect ratio (комнаты НЕ слишком вытянутые)
+                # Filter 2: Aspect ratio (rooms NOT too elongated)
                 rect = cv2.minAreaRect(contour)
                 width, height = rect[1]
                 if width > 0 and height > 0:
                     aspect_ratio = max(width, height) / min(width, height)
-                    if aspect_ratio > 5:  # Слишком вытянутый объект (труба, стена)
+                    if aspect_ratio > 5:  # Too elongated object (pipe, wall)
                         continue
                 
-                # Фильтр 3: Solidity (комнаты - это solid shapes)
+                # Filter 3: Solidity (rooms are solid shapes)
                 hull = cv2.convexHull(contour)
                 hull_area = cv2.contourArea(hull)
                 if hull_area > 0:
                     solidity = area / hull_area
-                    if solidity < 0.75:  # Слишком сложная форма (мебель)
+                    if solidity < 0.75:  # Too complex shape (furniture)
                         continue
                 
-                # Аппроксимация полигона
+                # Polygon approximation
                 epsilon = 0.012 * cv2.arcLength(contour, True)
                 approx = cv2.approxPolyDP(contour, epsilon, True)
                 
-                # Фильтр 4: Количество углов (комнаты имеют 3-12 углов)
+                # Filter 4: Number of corners (rooms have 3-12 corners)
                 if not (3 <= len(approx) <= 12):
                     continue
                 
@@ -283,59 +282,59 @@ def detect_rooms_sam2(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
 
 
 def detect_rooms_by_labels(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
-    """Интеллектуальная детекция комнат через OCR площадей.
+    """Intelligent room detection via OCR areas.
     
-    Использует EasyOCR для распознавания площадей комнат (например, "7.9", "12.6")
-    на плане БТИ и строит полигоны комнат через Watershed от найденных центров.
+    Uses EasyOCR to recognize room areas (e.g., "7.9", "12.6")
+    on technical drawings and builds room polygons via Watershed from found centers.
     
-    Алгоритм:
-    1. OCR распознавание текста на плане (EasyOCR)
-    2. Фильтрация: поиск чисел в диапазоне 0.8-20 м² (реалистичные площади комнат)
-    3. Исключение технических обозначений (k=, h=, размеры)
-    4. Использование координат найденных площадей как центров комнат
-    5. Watershed сегментация для построения полигонов от центров
-    6. Фильтрация результатов по area и aspect ratio
+    Algorithm:
+    1. OCR text recognition on plan (EasyOCR)
+    2. Filtering: search for numbers in range 0.8-20 m² (realistic room areas)
+    3. Exclude technical notations (k=, h=, dimensions)
+    4. Use coordinates of found areas as room centers
+    5. Watershed segmentation to build polygons from centers
+    6. Filter results by area and aspect ratio
     
     Args:
-        image: Оригинальное цветное изображение плана в BGR формате
-        binary: Бинаризованное изображение плана
+        image: Original color floor plan image in BGR format
+        binary: Binary floor plan image
         
     Returns:
-        List[Dict]: Список комнат, каждая комната - dict с ключами:
-            - "id": str, уникальный идентификатор (например, "r1")
-            - "polygon": List[[x, y]], вершины полигона комнаты
-            - "area": int, площадь комнаты в пикселях²
-            - "label": str, распознанный текст площади (например, "7.9")
-            - "area_sqm": float, площадь в квадратных метрах
+        List[Dict]: List of rooms, each room is a dict with keys:
+            - "id": str, unique identifier (e.g., "r1")
+            - "polygon": List[[x, y]], room polygon vertices
+            - "area": int, room area in pixels²
+            - "label": str, recognized area text (e.g., "7.9")
+            - "area_sqm": float, area in square meters
     """
     try:
         import easyocr
         reader = easyocr.Reader(['ru', 'en'], gpu=False, verbose=False)
         
-        # OCR на изображении
+        # OCR on image
         results = reader.readtext(image)
         
-        # Ищем числа похожие на площади комнат (СТРОГИЙ фильтр)
+        # Search for numbers similar to room areas (STRICT filter)
         room_centers = []
         for (bbox, text, conf) in results:
-            # ИСКЛЮЧАЕМ технические обозначения (k=, h=, w=, и т.д.)
+            # EXCLUDE technical notations (k=, h=, w=, etc.)
             if any(x in text.lower() for x in ['k=', 'h=', 'w=', 'х', '×']):
                 continue
             
-            # Пытаемся извлечь число
+            # Try to extract number
             import re
             numbers = re.findall(r'\d+\.?\d*', text)
             
-            # Должно быть ОДНО число (чистая площадь, не "3.96")
+            # Must be ONE number (pure area, not "3.96")
             if len(numbers) != 1:
                 continue
             
             try:
                 area_sqm = float(numbers[0])
-                # СТРОГИЙ фильтр: реалистичные площади КОМНАТ (0.8-20 м²)
-                # Включаем маленькие помещения (ванная, коридор, кладовка)
+                # STRICT filter: realistic ROOM areas (0.8-20 m²)
+                # Include small spaces (bathroom, corridor, storage)
                 if 0.8 <= area_sqm <= 20:
-                    # Центр bbox = центр комнаты
+                    # bbox center = room center
                     x_center = int((bbox[0][0] + bbox[2][0]) / 2)
                     y_center = int((bbox[0][1] + bbox[2][1]) / 2)
                     room_centers.append({
@@ -352,18 +351,18 @@ def detect_rooms_by_labels(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
         if not room_centers:
             return []
         
-        # Строим полигоны комнат используя watershed от центров
-        # Инвертируем (комнаты = белые области)
+        # Build room polygons using watershed from centers
+        # Invert (rooms = white areas)
         binary_inv = cv2.bitwise_not(binary)
         
-        # АГРЕССИВНОЕ закрытие разрывов в стенах (чтобы комнаты были замкнуты)
+        # AGGRESSIVE closing of wall breaks (so rooms are closed)
         kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
         binary_inv = cv2.morphologyEx(binary_inv, cv2.MORPH_CLOSE, kernel_close, iterations=3)
         
         # Distance transform
         dist = cv2.distanceTransform(binary_inv, cv2.DIST_L2, 5)
         
-        # Создаем маркеры для watershed
+        # Create markers for watershed
         markers = np.zeros(binary.shape, dtype=np.int32)
         for idx, room_center in enumerate(room_centers):
             cx, cy = room_center["center"]
@@ -373,7 +372,7 @@ def detect_rooms_by_labels(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
         bgr_img = cv2.cvtColor(binary_inv, cv2.COLOR_GRAY2BGR)
         cv2.watershed(bgr_img, markers)
         
-        # Извлекаем контуры комнат с ФИЛЬТРАЦИЕЙ
+        # Extract room contours with FILTERING
         rooms = []
         img_area = binary.shape[0] * binary.shape[1]
         
@@ -384,12 +383,12 @@ def detect_rooms_by_labels(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
             for contour in contours:
                 area = cv2.contourArea(contour)
                 
-                # ФИЛЬТР: комната НЕ должна быть слишком маленькой или ОГРОМНОЙ
+                # FILTER: room should NOT be too small or HUGE
                 if area < 2000:
                     continue
                 
-                # КРИТИЧЕСКИЙ ФИЛЬТР: комната НЕ должна занимать > 40% изображения
-                # (SAM2 иногда обводит всю квартиру)
+                # CRITICAL FILTER: room should NOT occupy > 40% of image
+                # (SAM2 sometimes outlines entire apartment)
                 if area > img_area * 0.4:
                     print(f"  ⚠️ Rejected room {idx+1}: too large ({area}/{img_area} = {area/img_area:.1%})")
                     continue
@@ -415,37 +414,37 @@ def detect_rooms_by_labels(image: np.ndarray, binary: np.ndarray) -> List[Dict]:
 
 
 def detect_rooms_fallback(binary: np.ndarray) -> List[Dict]:
-    """Fallback детекция комнат через морфологические операции.
+    """Fallback room detection via morphological operations.
     
-    Используется когда SAM2 недоступен или OCR не нашел комнаты.
-    Применяет морфологические операции для замыкания разрывов в стенах
-    и поиска замкнутых контуров (комнат).
+    Used when SAM2 is unavailable or OCR didn't find rooms.
+    Applies morphological operations to close wall breaks
+    and find closed contours (rooms).
     
-    Алгоритм:
-    1. Морфологическое закрытие разрывов (MORPH_CLOSE)
-    2. Инверсия изображения (комнаты = белые области)
-    3. Удаление шума (MORPH_OPEN)
-    4. Поиск контуров с иерархией (RETR_TREE)
-    5. Фильтрация по площади, иерархии и количеству углов
+    Algorithm:
+    1. Morphological closing of breaks (MORPH_CLOSE)
+    2. Image inversion (rooms = white areas)
+    3. Noise removal (MORPH_OPEN)
+    4. Contour search with hierarchy (RETR_TREE)
+    5. Filtering by area, hierarchy, and number of corners
     
     Args:
-        binary: Бинаризованное изображение плана
+        binary: Binary floor plan image
         
     Returns:
-        List[Dict]: Список комнат с полигонами и площадями
+        List[Dict]: List of rooms with polygons and areas
     """
-    # Закрытие разрывов (умеренное)
+    # Close breaks (moderate)
     kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 11))
     closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=5)
     
-    # Инвертируем (комнаты = белые области)
+    # Invert (rooms = white areas)
     binary_inv = cv2.bitwise_not(closed)
     
-    # Убираем мелкий шум
+    # Remove small noise
     kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     binary_inv = cv2.morphologyEx(binary_inv, cv2.MORPH_OPEN, kernel_open, iterations=2)
     
-    # Находим контуры с иерархией
+    # Find contours with hierarchy
     contours, hierarchy = cv2.findContours(binary_inv, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     
     print(f"📊 Found {len(contours)} total contours")
@@ -456,20 +455,20 @@ def detect_rooms_fallback(binary: np.ndarray) -> List[Dict]:
     for idx, contour in enumerate(contours):
         area = cv2.contourArea(contour)
         
-        # Фильтр по площади (более мягкий)
+        # Area filter (more lenient)
         if not (1000 < area < img_area * 0.9):
             continue
         
-        # Проверяем иерархию
+        # Check hierarchy
         parent = hierarchy[0][idx][3]
-        if parent == -1 and area < 5000:  # Только очень маленькие без родителя пропускаем
+        if parent == -1 and area < 5000:  # Only very small ones without parent are skipped
             continue
         
-        # Аппроксимация полигона
+        # Polygon approximation
         epsilon = 0.015 * cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, epsilon, True)
         
-        if len(approx) >= 3:  # Минимум 3 угла
+        if len(approx) >= 3:  # Minimum 3 corners
             polygon = [[int(p[0][0]), int(p[0][1])] for p in approx]
             rooms.append({
                 "id": f"r{len(rooms)+1}",
@@ -483,18 +482,18 @@ def detect_rooms_fallback(binary: np.ndarray) -> List[Dict]:
 
 
 def snap_to_axis(x1: float, y1: float, x2: float, y2: float) -> Tuple[int, int, int, int]:
-    """Выравнивание линии по основным углам (0°/45°/90°/135°).
+    """Align line to main angles (0°/45°/90°/135°).
     
-    Корректирует координаты концов линии чтобы она была строго
-    горизонтальной, вертикальной или диагональной (45°/135°).
-    Улучшает качество детекции стен на планах.
+    Corrects line endpoint coordinates so it is strictly
+    horizontal, vertical, or diagonal (45°/135°).
+    Improves wall detection quality on plans.
     
     Args:
-        x1, y1: Координаты первой точки
-        x2, y2: Координаты второй точки
+        x1, y1: First point coordinates
+        x2, y2: Second point coordinates
         
     Returns:
-        Tuple[int, int, int, int]: Скорректированные координаты (x1, y1, x2, y2)
+        Tuple[int, int, int, int]: Corrected coordinates (x1, y1, x2, y2)
     """
     dx, dy = x2 - x1, y2 - y1
     length = np.hypot(dx, dy)
@@ -520,18 +519,18 @@ def snap_to_axis(x1: float, y1: float, x2: float, y2: float) -> Tuple[int, int, 
 
 
 def merge_segments(segments: List[Dict], max_angle: float, max_gap: float) -> List[Dict]:
-    """Слияние коллинеарных сегментов стен.
+    """Merge collinear wall segments.
     
-    Объединяет фрагментированные линии стен в единые сегменты
-    на основе угла между ними и расстояния между концами.
+    Combines fragmented wall lines into single segments
+    based on angle between them and distance between endpoints.
     
     Args:
-        segments: Список сегментов стен
-        max_angle: Максимальный угол между сегментами для слияния (градусы)
-        max_gap: Максимальное расстояние между концами сегментов (пиксели)
+        segments: List of wall segments
+        max_angle: Maximum angle between segments for merging (degrees)
+        max_gap: Maximum distance between segment endpoints (pixels)
         
     Returns:
-        List[Dict]: Объединённые сегменты стен
+        List[Dict]: Merged wall segments
     """
     if not segments:
         return []
@@ -576,17 +575,17 @@ def merge_segments(segments: List[Dict], max_angle: float, max_gap: float) -> Li
 
 
 def angle_between(p1, p2, p3, p4) -> float:
-    """Вычисление угла между двумя сегментами.
+    """Calculate angle between two segments.
     
-    Рассчитывает минимальный угол между векторами двух сегментов
-    через скалярное произведение.
+    Computes minimum angle between vectors of two segments
+    via dot product.
     
     Args:
-        p1, p2: Концы первого сегмента [x, y]
-        p3, p4: Концы второго сегмента [x, y]
+        p1, p2: First segment endpoints [x, y]
+        p3, p4: Second segment endpoints [x, y]
         
     Returns:
-        float: Угол между сегментами в градусах (0-90°)
+        float: Angle between segments in degrees (0-90°)
     """
     v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
     v2 = np.array([p4[0] - p3[0], p4[1] - p3[1]])
@@ -599,25 +598,25 @@ def angle_between(p1, p2, p3, p4) -> float:
 
 
 def process_image(image_bytes: bytes, source_name: str = "unknown.png") -> Dict:
-    """Основной pipeline распознавания плана помещения.
+    """Main floor plan recognition pipeline.
     
-    Выполняет полный цикл обработки изображения плана:
-    1. Декодирование изображения из bytes
-    2. Предобработка (CLAHE, фильтрация, бинаризация)
-    3. Детекция стен (Hough Transform)
-    4. Детекция комнат (OCR площадей + Watershed, fallback SAM2)
-    5. Комбинирование результатов OCR и SAM2
+    Performs full cycle of floor plan image processing:
+    1. Image decoding from bytes
+    2. Preprocessing (CLAHE, filtering, binarization)
+    3. Wall detection (Hough Transform)
+    4. Room detection (OCR areas + Watershed, fallback SAM2)
+    5. Combining OCR and SAM2 results
     
     Args:
-        image_bytes: Байты изображения (JPG/PNG)
-        source_name: Имя исходного файла (опционально)
+        image_bytes: Image bytes (JPG/PNG)
+        source_name: Source filename (optional)
         
     Returns:
-        Dict: JSON с результатами распознавания:
-            - "meta": Dict с метаданными (source, width, height, model)
-            - "walls": List[Dict] список стен с координатами
-            - "rooms": List[Dict] список комнат с полигонами и площадями
-            - "error": str (только при ошибке)
+        Dict: JSON with recognition results:
+            - "meta": Dict with metadata (source, width, height, model)
+            - "walls": List[Dict] list of walls with coordinates
+            - "rooms": List[Dict] list of rooms with polygons and areas
+            - "error": str (only on error)
     """
     nparr = np.frombuffer(image_bytes, np.uint8)
     bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -627,25 +626,25 @@ def process_image(image_bytes: bytes, source_name: str = "unknown.png") -> Dict:
     
     binary = preprocess(bgr)
     
-    # ОСНОВНАЯ ЗАДАЧА: Детекция стен
+    # MAIN TASK: Wall detection
     walls = detect_walls(binary)
     
-    # БОНУС: Контуры помещений (УМНАЯ детекция через OCR площадей)
+    # BONUS: Room contours (SMART detection via OCR areas)
     rooms = detect_rooms_by_labels(bgr, binary)
     
-    # КОМБИНИРОВАННЫЙ подход: Если OCR нашел мало комнат, дополняем через SAM2
-    if len(rooms) < 5:  # Ожидаем минимум 5-6 комнат в квартире
+    # COMBINED approach: If OCR found few rooms, supplement with SAM2
+    if len(rooms) < 5:  # Expect minimum 5-6 rooms in apartment
         print(f"⚠️ OCR found only {len(rooms)} rooms, adding SAM2 rooms...")
         sam2_rooms = detect_rooms_sam2(bgr, binary)
         
-        # Добавляем SAM2 комнаты которые НЕ пересекаются с OCR комнатами
+        # Add SAM2 rooms that do NOT intersect with OCR rooms
         for sam_room in sam2_rooms:
             is_duplicate = False
             sam_poly = np.array(sam_room["polygon"], dtype=np.int32)
             
             for ocr_room in rooms:
                 ocr_poly = np.array(ocr_room["polygon"], dtype=np.int32)
-                # Проверяем пересечение полигонов
+                # Check polygon intersection
                 intersection = cv2.intersectConvexConvex(ocr_poly, sam_poly)[1]
                 if intersection is not None and cv2.contourArea(intersection) > 1000:
                     is_duplicate = True

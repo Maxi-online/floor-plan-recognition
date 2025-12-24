@@ -1,56 +1,56 @@
 # Docker Deployment Guide
 
-Краткое руководство по запуску проекта в Docker контейнере.
+Quick guide for running the project in a Docker container.
 
-## Требования
+## Requirements
 
-- **Docker Desktop** (Windows/Mac) или **Docker Engine** (Linux)
+- **Docker Desktop** (Windows/Mac) or **Docker Engine** (Linux)
 - **Docker Compose** v2.0+
-- **8GB RAM** минимум (рекомендуется 16GB)
-- **10GB** свободного места на диске
+- **8GB RAM** minimum (16GB recommended)
+- **10GB** free disk space
 
-## Быстрый старт
+## Quick Start
 
 ### Windows:
 
 ```bash
-# Запуск
+# Start
 docker-run.bat
 
-# Остановка
+# Stop
 docker-stop.bat
 ```
 
 ### Linux/Mac:
 
 ```bash
-# Сборка образа
+# Build image
 docker-compose build
 
-# Запуск сервисов
+# Start services
 docker-compose up -d
 
-# Остановка
+# Stop
 docker-compose down
 ```
 
-## Структура проекта
+## Project Structure
 
 ```
 room-detector/
-├── Dockerfile              # Образ с Python + зависимости
-├── docker-compose.yml      # Оркестрация сервисов
-├── .dockerignore          # Исключения для сборки
-├── docker-run.bat         # Быстрый запуск (Windows)
-├── docker-stop.bat        # Быстрая остановка (Windows)
-└── settings_secret.json   # Конфигурация (токен TG бота)
+├── Dockerfile              # Image with Python + dependencies
+├── docker-compose.yml      # Service orchestration
+├── .dockerignore          # Build exclusions
+├── docker-run.bat         # Quick start (Windows)
+├── docker-stop.bat        # Quick stop (Windows)
+└── settings_secret.json   # Configuration (Telegram bot token)
 ```
 
-## Конфигурация
+## Configuration
 
 ### 1. Telegram Bot Token
 
-Создайте/обновите `settings_secret.json`:
+Create/update `settings_secret.json`:
 
 ```json
 {
@@ -59,63 +59,63 @@ room-detector/
 }
 ```
 
-### 2. Порты
+### 2. Ports
 
-По умолчанию используются порты:
+Default ports:
 - `8001` - Cleanup Service
 - `8002` - OCR Service  
 - `8003` - Hybrid Service (main)
 
-Изменить можно в `docker-compose.yml`:
+Can be changed in `docker-compose.yml`:
 
 ```yaml
 ports:
   - "8001:8001"  # host:container
 ```
 
-## Что происходит при сборке
+## What Happens During Build
 
-1. **Базовый образ**: Python 3.8-slim
-2. **Системные зависимости**: OpenCV, GL libraries
-3. **Python пакеты**: SAM2, EasyOCR, FastAPI, и др.
-4. **Веса моделей**: SAM 2.1 Large (224MB) копируется или скачивается
-5. **Автозапуск**: Все 4 сервиса стартуют автоматически
+1. **Base image**: Python 3.8-slim
+2. **System dependencies**: OpenCV, GL libraries
+3. **Python packages**: SAM2, EasyOCR, FastAPI, etc.
+4. **Model weights**: SAM 2.1 Large (224MB) copied or downloaded
+5. **Auto-start**: All 4 services start automatically
 
-## Полезные команды
+## Useful Commands
 
 ```bash
-# Просмотр логов в реальном времени
+# View logs in real-time
 docker-compose logs -f
 
-# Просмотр логов конкретного сервиса
+# View logs for specific service
 docker-compose logs -f floor-plan-service
 
-# Перезапуск сервисов
+# Restart services
 docker-compose restart
 
-# Вход в контейнер для отладки
+# Enter container for debugging
 docker-compose exec floor-plan-service bash
 
-# Проверка статуса
+# Check status
 docker-compose ps
 
-# Очистка старых образов
+# Clean up old images
 docker system prune -a
 ```
 
-## Проверка работоспособности
+## Health Check
 
-После запуска контейнера проверьте:
+After starting the container, check:
 
 ```bash
 # Health check Hybrid Service
 curl http://localhost:8003/health
 
-# Список сервисов
+# List services
 docker-compose ps
 ```
 
-Ожидаемый ответ от `/health`:
+Expected response from `/health`:
 ```json
 {
   "status": "ok",
@@ -125,19 +125,19 @@ docker-compose ps
 
 ## Troubleshooting
 
-### Контейнер не запускается
+### Container won't start
 
 ```bash
-# Просмотр логов
+# View logs
 docker-compose logs
 
-# Пересборка образа с нуля
+# Rebuild image from scratch
 docker-compose build --no-cache
 ```
 
-### Нехватка памяти
+### Out of memory
 
-Увеличьте лимиты в `docker-compose.yml`:
+Increase limits in `docker-compose.yml`:
 
 ```yaml
 deploy:
@@ -146,36 +146,36 @@ deploy:
       memory: 16G
 ```
 
-### Порты заняты
+### Ports in use
 
-Измените порты в `docker-compose.yml` на свободные.
+Change ports in `docker-compose.yml` to available ones.
 
-## Обновление
+## Updating
 
 ```bash
-# Остановка
+# Stop
 docker-compose down
 
-# Пересборка с последними изменениями
+# Rebuild with latest changes
 docker-compose build
 
-# Запуск
+# Start
 docker-compose up -d
 ```
 
-## Персистентность данных
+## Data Persistence
 
-Веса моделей кэшируются в Docker volumes:
+Model weights are cached in Docker volumes:
 - `model-cache` - SAM2 weights
 - `easyocr-cache` - EasyOCR models
 
-Это ускоряет повторные запуски контейнера.
+This speeds up subsequent container starts.
 
 ## Production Deployment
 
-Для production рекомендуется:
+For production, it's recommended to:
 
-1. **Использовать GPU** (если доступен):
+1. **Use GPU** (if available):
    ```yaml
    deploy:
      resources:
@@ -186,7 +186,7 @@ docker-compose up -d
              capabilities: [gpu]
    ```
 
-2. **Настроить reverse proxy** (nginx/traefik)
-3. **Добавить HTTPS** через Let's Encrypt
-4. **Мониторинг** через Prometheus/Grafana
-5. **Backups** конфигурации и volumes
+2. **Configure reverse proxy** (nginx/traefik)
+3. **Add HTTPS** via Let's Encrypt
+4. **Monitoring** via Prometheus/Grafana
+5. **Backups** of configuration and volumes

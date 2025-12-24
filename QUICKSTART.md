@@ -1,42 +1,42 @@
 # Quick Start Guide
 
-Запуск за 3 минуты!
+Get started in 3 minutes!
 
-## Что нужно
+## Requirements
 
-- Docker Desktop (Windows/Mac) или Docker Engine (Linux)
-- Telegram Bot Token ([получить от @BotFather](https://t.me/BotFather))
+- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+- Telegram Bot Token ([get from @BotFather](https://t.me/BotFather))
 
-## Шаг за шагом
+## Step by Step
 
-### 1. Получите Telegram Bot Token
+### 1. Get Telegram Bot Token
 
 ```
-1. Откройте @BotFather в Telegram
-2. Отправьте /newbot
-3. Следуйте инструкциям
-4. Скопируйте token (например: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz)
+1. Open @BotFather in Telegram
+2. Send /newbot
+3. Follow the instructions
+4. Copy the token (e.g.: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz)
 ```
 
-### 2. Склонируйте проект
+### 2. Clone the Project
 
 ```bash
 git clone <repository-url>
 cd room-detector
 ```
 
-### 3. Создайте конфигурацию
+### 3. Create Configuration
 
-Создайте файл `settings_secret.json`:
+Create `settings_secret.json` file:
 
 ```json
 {
-  "telegram_bot_token": "ВАШ_ТОКЕН_СЮДА",
+  "telegram_bot_token": "YOUR_TOKEN_HERE",
   "hybrid_url": "http://localhost:8003/detect"
 }
 ```
 
-### 4. Запустите Docker
+### 4. Start Docker
 
 **Windows:**
 ```bash
@@ -48,67 +48,70 @@ docker-run.bat
 docker-compose up -d
 ```
 
-### 5. Готово!
+### 5. Ready!
 
-Откройте вашего бота в Telegram и отправьте /start
+Open your bot in Telegram and send /start
 
-## Использование
+## Usage
 
-1. Отправьте изображение плана в бот
-2. Подождите 10-20 секунд
-3. Получите визуализацию + JSON
+1. Send a floor plan image to the bot
+2. Wait 10-20 seconds
+3. Get visualization + JSON
 
-## Проверка работы
+## Health Check
 
 ```bash
-# Проверить что сервисы запущены
+# Check that services are running
 docker-compose ps
 
-# Посмотреть логи
+# View logs
 docker-compose logs -f
 
-# Проверить health
+# Check health
 curl http://localhost:8003/health
 ```
 
-Должно вернуть:
+Should return:
 ```json
 {"status": "ok", "sam2_large": true}
 ```
 
-## Если что-то не работает
+## Troubleshooting
 
-### Docker не запускается?
+### Docker won't start?
+
 ```bash
-# Убедитесь что Docker Desktop запущен
+# Make sure Docker Desktop is running
 docker info
 
-# Если видите ошибку - перезапустите Docker Desktop
+# If you see an error - restart Docker Desktop
 ```
 
-### Бот не отвечает?
+### Bot not responding?
+
 ```bash
-# Проверьте логи
+# Check logs
 docker-compose logs floor-plan-service
 
-# Проверьте что токен правильный
+# Check that token is correct
 cat settings_secret.json
 ```
 
-### Порты заняты?
-Измените порты в `docker-compose.yml`:
+### Ports in use?
+
+Change ports in `docker-compose.yml`:
 ```yaml
 ports:
-  - "9001:8001"  # вместо 8001:8001
-  - "9002:8002"  # вместо 8002:8002
-  - "9003:8003"  # вместо 8003:8003
+  - "9001:8001"  # instead of 8001:8001
+  - "9002:8002"  # instead of 8002:8002
+  - "9003:8003"  # instead of 8003:8003
 ```
 
-## Больше информации
+## More Information
 
-- [Полная документация](README.md)
-- [Docker гайд](DOCKER.md)
+- [Full documentation](README.md)
+- [Docker guide](DOCKER.md)
 
 ---
 
-**Нужна помощь?** Проверьте логи: `docker-compose logs -f`
+**Need help?** Check logs: `docker-compose logs -f`

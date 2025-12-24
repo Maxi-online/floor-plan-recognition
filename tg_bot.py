@@ -1,24 +1,23 @@
-"""Telegram Bot для распознавания планов помещений.
+"""Telegram Bot for Floor Plan Recognition.
 
-Telegram бот предоставляет удобный интерфейс для работы с системой
-распознавания планов помещений. Принимает изображения планов и возвращает
-визуализацию + JSON с координатами стен, комнат и размеров.
+Telegram bot provides a convenient interface for working with the floor plan
+recognition system. Accepts floor plan images and returns visualization + JSON
+with coordinates of walls, rooms, and dimensions.
 
-Основные возможности:
-    - Приём изображений планов (JPG/PNG)
-    - Параллельная обработка (Hybrid Service + OCR Service)
-    - Визуализация результатов (стены, комнаты, размеры)
-    - Отправка JSON файла с координатами
+Main features:
+    - Accept floor plan images (JPG/PNG)
+    - Parallel processing (Hybrid Service + OCR Service)
+    - Result visualization (walls, rooms, dimensions)
+    - Send JSON file with coordinates
 
-Технологический стек:
-    - python-telegram-bot для Telegram API
-    - httpx для асинхронных HTTP запросов
-    - OpenCV для визуализации результатов
+Technology stack:
+    - python-telegram-bot for Telegram API
+    - httpx for async HTTP requests
+    - OpenCV for result visualization
 
-Автор: Стреколовский Максим Владимирович
-Заказчик: ООО Refloor
-Дата: 10.12.2025
-Версия: 1.0
+Author: Maksim Strekolovsky
+Date: 10.12.2025
+Version: 1.0
 """
 import asyncio
 import io
@@ -44,24 +43,24 @@ from settings import load_settings
 
 
 async def send_to_hybrid(image_bytes: bytes, url: str) -> Dict[str, Any]:
-    """Отправка изображения в Hybrid Service для детекции стен и комнат.
+    """Send image to Hybrid Service for wall and room detection.
     
-    Использует SAM 2.1 Large + Hough Transform для распознавания структуры плана.
+    Uses SAM 2.1 Large + Hough Transform for plan structure recognition.
     
     Args:
-        image_bytes: Байты изображения плана
-        url: URL Hybrid Service
+        image_bytes: Floor plan image bytes
+        url: Hybrid Service URL
         
     Returns:
-        Dict[str, Any]: JSON с результатами распознавания:
-            - "meta": метаданные
-            - "walls": список стен
-            - "rooms": список комнат
+        Dict[str, Any]: JSON with recognition results:
+            - "meta": metadata
+            - "walls": list of walls
+            - "rooms": list of rooms
             
     Raises:
-        httpx.HTTPStatusError: При ошибке HTTP запроса
+        httpx.HTTPStatusError: On HTTP request error
     """
-    async with httpx.AsyncClient(timeout=1200) as client:  # 20 минут для SAM2
+    async with httpx.AsyncClient(timeout=1200) as client:  # 20 minutes for SAM2
         files = {"file": ("plan.png", image_bytes, "image/png")}
         resp = await client.post(url, files=files)
         resp.raise_for_status()
@@ -69,23 +68,23 @@ async def send_to_hybrid(image_bytes: bytes, url: str) -> Dict[str, Any]:
 
 
 async def send_to_ocr(image_bytes: bytes, base_url: str) -> Dict[str, Any]:
-    """Отправка изображения в OCR Service для распознавания текста.
+    """Send image to OCR Service for text recognition.
     
-    Использует EasyOCR для распознавания размеров и площадей комнат на плане.
+    Uses EasyOCR to recognize dimensions and room areas on the plan.
     
     Args:
-        image_bytes: Байты изображения плана
-        base_url: Базовый URL (не используется, OCR всегда localhost:8002)
+        image_bytes: Floor plan image bytes
+        base_url: Base URL (not used, OCR always localhost:8002)
         
     Returns:
-        Dict[str, Any]: JSON с результатами OCR:
-            - "items": список распознанных элементов
-            - "model": название модели ("EasyOCR")
+        Dict[str, Any]: JSON with OCR results:
+            - "items": list of recognized elements
+            - "model": model name ("EasyOCR")
             
     Note:
-        При ошибке возвращает пустой список items
+        Returns empty items list on error
     """
-    ocr_url = "http://localhost:8002/ocr"  # Фиксированный URL для OCR
+    ocr_url = "http://localhost:8002/ocr"  # Fixed URL for OCR
     async with httpx.AsyncClient(timeout=120) as client:
         files = {"file": ("plan.png", image_bytes, "image/png")}
         resp = await client.post(ocr_url, files=files)
@@ -95,25 +94,25 @@ async def send_to_ocr(image_bytes: bytes, base_url: str) -> Dict[str, Any]:
 
 
 def visualize_result(image_bytes: bytes, result_json: Dict[str, Any]) -> bytes:
-    """Визуализация результатов распознавания на изображении плана.
+    """Visualize recognition results on the floor plan image.
     
-    Рисует поверх оригинального плана:
-    - Стены (красные линии с ID)
-    - Комнаты (зелёные полигоны с ID)
-    - OCR размеры (синие bbox с текстом)
+    Draws on top of the original plan:
+    - Walls (red lines with ID)
+    - Rooms (green polygons with ID)
+    - OCR dimensions (blue bbox with text)
     
     Args:
-        image_bytes: Байты оригинального изображения
-        result_json: JSON с результатами распознавания
+        image_bytes: Original image bytes
+        result_json: JSON with recognition results
         
     Returns:
-        bytes: Изображение с визуализацией в PNG формате
+        bytes: Image with visualization in PNG format
     """
-    # Декодируем изображение
+    # Decode image
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
-    # Рисуем стены (красный)
+    # Draw walls (red)
     for wall in result_json.get("walls", []):
         points = wall["points"]
         if len(points) >= 2:
@@ -121,7 +120,7 @@ def visualize_result(image_bytes: bytes, result_json: Dict[str, Any]) -> bytes:
                 pt1 = tuple(points[i])
                 pt2 = tuple(points[i + 1])
                 cv2.line(img, pt1, pt2, (0, 0, 255), 3)
-            # ID стены
+            # Wall ID
             mid_x = int(np.mean([p[0] for p in points]))
             mid_y = int(np.mean([p[1] for p in points]))
             cv2.putText(
@@ -129,43 +128,43 @@ def visualize_result(image_bytes: bytes, result_json: Dict[str, Any]) -> bytes:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1
             )
     
-    # Кодируем обратно в bytes
+    # Encode back to bytes
     _, buffer = cv2.imencode('.png', img)
     return buffer.tobytes()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик команды /start.
+    """Handler for /start command.
     
-    Отправляет приветственное сообщение с инструкцией по использованию бота.
+    Sends welcome message with bot usage instructions.
     
     Args:
-        update: Telegram Update объект
-        context: Контекст приложения
+        update: Telegram Update object
+        context: Application context
     """
     text = (
-        "🏠 Бот распознавания планов помещений\n\n"
-        "Отправьте фото плана (JPG/PNG) — я верну:\n"
-        "• Визуализацию с найденными стенами\n"
-        "• JSON файл с координатами стен\n\n"
-        "🤖 Использую Hough Transform\n"
-        "⏱️ Обработка занимает 10-20 секунд"
+        "🏠 Floor Plan Recognition Bot\n\n"
+        "Send a floor plan photo (JPG/PNG) — I'll return:\n"
+        "• Visualization with detected walls\n"
+        "• JSON file with wall coordinates\n\n"
+        "🤖 Using Hough Transform\n"
+        "⏱️ Processing takes 10-20 seconds"
     )
     await update.message.reply_text(text)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обработчик фотографий/изображений.
+    """Handler for photos/images.
     
-    Основная логика бота:
-    1. Получение изображения от пользователя
-    2. Параллельная отправка в Hybrid Service и OCR Service
-    3. Визуализация результатов
-    4. Отправка пользователю визуализации + JSON
+    Main bot logic:
+    1. Get image from user
+    2. Parallel sending to Hybrid Service and OCR Service
+    3. Result visualization
+    4. Send visualization + JSON to user
     
     Args:
-        update: Telegram Update объект с фото
-        context: Контекст приложения с bot_data
+        update: Telegram Update object with photo
+        context: Application context with bot_data
     """
     if not update.message or not update.message.photo:
         return
@@ -175,26 +174,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     image_bytes = bytes(await file.download_as_bytearray())
 
     try:
-        # Уведомляем пользователя о начале обработки
+        # Notify user that processing started
         await update.message.reply_text(
-            "🔄 Обработка началась...\n"
-            "⏱️ Займёт 10-20 секунд (Hough Transform)"
+            "🔄 Processing started...\n"
+            "⏱️ Will take 10-20 seconds (Hough Transform)"
         )
         
-        # Отправляем в Hybrid Service
+        # Send to Hybrid Service
         payload = await send_to_hybrid(image_bytes, hybrid_url)
         
-        # Визуализация результата
+        # Visualize result
         viz_image = visualize_result(image_bytes, payload)
         
-        # Отправляем статистику
+        # Send statistics
         stats = (
-            f"📊 Распознано:\n"
-            f"🔴 Стен: {len(payload.get('walls', []))}\n\n"
+            f"📊 Recognized:\n"
+            f"🔴 Walls: {len(payload.get('walls', []))}\n\n"
             f"🤖 Hough Transform"
         )
         
-        # Отправляем визуализацию + JSON
+        # Send visualization + JSON
         await update.message.reply_photo(
             photo=io.BytesIO(viz_image),
             caption=stats,
@@ -204,20 +203,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_document(
             document=io.BytesIO(json_bytes),
             filename="result.json",
-            caption="📄 JSON с координатами",
+            caption="📄 JSON with coordinates",
         )
     except Exception as exc:  # noqa: BLE001
-        await update.message.reply_text(f"❌ Ошибка: {exc}")
+        await update.message.reply_text(f"❌ Error: {exc}")
 
 
 def build_app() -> Application:
-    """Создание и конфигурация Telegram бота.
+    """Create and configure Telegram bot.
     
-    Загружает настройки из settings_secret.json,
-    создаёт Application с обработчиками команд и сообщений.
+    Loads settings from settings_secret.json,
+    creates Application with command and message handlers.
     
     Returns:
-        Application: Сконфигурированный Telegram бот
+        Application: Configured Telegram bot
     """
     token, hybrid_url = load_settings()
     app = ApplicationBuilder().token(token).build()
@@ -229,10 +228,10 @@ def build_app() -> Application:
 
 
 def main() -> None:
-    """Точка входа в приложение.
+    """Application entry point.
     
-    Создаёт и запускает Telegram бота в режиме polling.
-    Обрабатывает Conflict исключение (если бот уже запущен).
+    Creates and runs Telegram bot in polling mode.
+    Handles Conflict exception (if bot is already running).
     """
     app = build_app()
     try:

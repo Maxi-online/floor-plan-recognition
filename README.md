@@ -1,244 +1,403 @@
 # Floor Plan Recognition Service
 
-Прототип системы распознавания планов помещений для **ООО Refloor**.
+A computer vision system for automatic extraction of structural elements from architectural floor plan images. This service processes scanned or photographed floor plans and outputs structured JSON data containing wall coordinates, room boundaries, and spatial relationships.
 
-**Автор:** Стреколовский Максим Владимирович  
-**Дата:** 10.12.2025  
-**Статус:** Prototype / Proof of Concept
+## Overview
 
----
+The Floor Plan Recognition Service is a prototype system designed to automate the digitization of architectural drawings. It employs a hybrid approach combining classical computer vision techniques (Hough Transform) with state-of-the-art deep learning models (SAM 2.1) to detect and extract structural elements from floor plan images.
 
-## Задача
+### Key Features
 
-Автоматическое извлечение структуры стен из изображений планов помещений (квартиры, офисы).
+- **Wall Detection**: Automatic extraction of wall lines using Probabilistic Hough Transform with post-processing
+- **Image Preprocessing**: Advanced pipeline with CLAHE, bilateral filtering, and adaptive thresholding
+- **Room Segmentation**: Experimental support for room boundary detection via SAM 2.1 and OCR-based methods
+- **RESTful API**: FastAPI-based microservices architecture
+- **Telegram Bot Interface**: User-friendly interface for quick testing and demonstration
+- **Docker Deployment**: Containerized setup for easy deployment and reproducibility
 
-**Входные данные:** JPG/PNG изображения планов  
-**Выходной формат:**
+## Architecture
+
+The system consists of multiple microservices:
+
+```
+┌─────────────────┐
+│  Telegram Bot   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────────────────┐
+│   Hybrid Service (Port 8003)        │
+│   • Wall Detection (Hough)         │
+│   • Room Segmentation (SAM2/OCR)   │
+└────────┬────────────────────────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌─────────┐ ┌──────────────┐
+│ Cleanup │ │ OCR Service  │
+│ Service │ │ (Port 8002)  │
+│(Port    │ └──────────────┘
+│ 8001)   │
+└─────────┘
+```
+
+## Technology Stack
+
+| Component | Technology | Rationale |
+|-----------|-----------|------------|
+| **Wall Detection** | OpenCV Hough Transform | Classical CV method, fast, interpretable, no training required |
+| **Preprocessing** | OpenCV (CLAHE, bilateral, morphology) | Industry standard for image processing, well-documented |
+| **Room Segmentation** | SAM 2.1 Large (Meta) | State-of-the-art zero-shot segmentation (2024), high accuracy |
+| **OCR** | EasyOCR | Best open-source alternative to Tesseract, supports multiple languages |
+| **Backend Framework** | FastAPI | Modern, fast Python web framework with automatic API documentation |
+| **Interface** | Telegram Bot (python-telegram-bot) | Simple UX without web development, easy deployment |
+| **Deployment** | Docker & Docker Compose | Reproducible environment, easy deployment, service orchestration |
+
+## Processing Pipeline
+
+### Stage 1: Image Preprocessing
+
+The preprocessing stage enhances image quality and prepares it for feature extraction:
+
+```
+Input Image (JPG/PNG)
+    ↓
+CLAHE (Contrast Limited Adaptive Histogram Equalization)
+    ↓
+Bilateral Filter (Edge-preserving smoothing)
+    ↓
+Otsu + Adaptive Thresholding (Binarization)
+    ↓
+Morphological Operations (Noise removal & gap closing)
+    ↓
+Binary Image (Ready for feature extraction)
+```
+
+**Key Parameters:**
+- CLAHE: `clipLimit=3.0`, `tileGridSize=(8, 8)`
+- Bilateral Filter: `d=9`, `sigmaColor=75`, `sigmaSpace=75`
+- Adaptive Threshold: `blockSize=21`, `C=10`
+
+### Stage 2: Wall Detection
+
+Wall detection uses a multi-step approach to extract linear features:
+
+```
+Binary Image
+    ↓
+Skeletonization (scikit-image thin algorithm)
+    ↓
+Probabilistic Hough Transform
+    • threshold=30 (optimized for interior walls)
+    • minLineLength=20 pixels
+    • maxLineGap=35 pixels
+    ↓
+Snap to Axis (Alignment to 0°/45°/90°/135°)
+    ↓
+Deduplication (Remove overlapping segments)
+    ↓
+Merge Collinear Segments (max_angle=3°, max_gap=50px)
+    ↓
+JSON Output (Wall coordinates with unique IDs)
+```
+
+## Output Format
+
+The service returns structured JSON data:
+
 ```json
 {
-  "meta": { "source": "plan.png" },
+  "meta": {
+    "source": "plan.png",
+    "width": 1920,
+    "height": 1080,
+    "model": "hough_transform_v1.0"
+  },
   "walls": [
-    { "id": "w1", "points": [[x1,y1], [x2,y2]] }
+    {
+      "id": "w1",
+      "points": [[100, 200], [500, 200]]
+    },
+    {
+      "id": "w2",
+      "points": [[500, 200], [500, 600]]
+    }
+  ],
+  "rooms": [
+    {
+      "id": "r1",
+      "polygon": [[100, 200], [500, 200], [500, 600], [100, 600]],
+      "area": 120000,
+      "area_sqm": 12.5,
+      "label": "12.5"
+    }
   ]
 }
 ```
 
----
+## Installation
 
-## Pipeline обработки
+### Prerequisites
 
-### Этап 1: Preprocessing
-```
-Входное изображение
-    ↓
-CLAHE (усиление контраста)
-    ↓
-Bilateral filter (сглаживание с сохранением границ)
-    ↓
-Otsu + Adaptive thresholding (бинаризация)
-    ↓
-Morphological operations (удаление шума)
-    ↓
-Бинарное изображение
-```
+- Docker Desktop (Windows/Mac) or Docker Engine (Linux)
+- Docker Compose v2.0+
+- Minimum 8GB RAM (16GB recommended)
+- 10GB free disk space
 
-### Этап 2: Wall Detection
-```
-Бинарное изображение
-    ↓
-Skeletonization (scikit-image thin)
-    ↓
-Probabilistic Hough Transform
-  • threshold=30 (низкий порог для внутренних стен)
-  • minLineLength=20
-  • maxLineGap=35
-    ↓
-Snap to axis (выравнивание по 0°/45°/90°/135°)
-    ↓
-Deduplication (удаление дубликатов)
-    ↓
-Merge collinear segments (слияние коллинеарных линий)
-    ↓
-JSON output
-```
+### Quick Start
 
----
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd room-detector
+   ```
 
-## Технологический стек
+2. **Create configuration file:**
+   ```bash
+   echo '{"telegram_bot_token":"YOUR_BOT_TOKEN","hybrid_url":"http://localhost:8003/detect"}' > settings_secret.json
+   ```
+   
+   To get a Telegram bot token:
+   - Open [@BotFather](https://t.me/BotFather) on Telegram
+   - Send `/newbot` and follow instructions
+   - Copy the provided token
 
-### Используемые инструменты:
+3. **Start services:**
+   ```bash
+   # Windows
+   docker-run.bat
+   
+   # Linux/Mac
+   docker-compose up -d
+   ```
 
-| Компонент | Технология | Почему выбрано |
-|-----------|-----------|----------------|
-| **Wall Detection** | OpenCV Hough Transform | Классический CV метод, быстрый, интерпретируемый |
-| **Preprocessing** | OpenCV (CLAHE, bilateral, morphology) | Стандарт индустрии для обработки изображений |
-| **Room Segmentation** | SAM 2.1 Large (Meta) | SOTA zero-shot сегментация (2024) |
-| **OCR** | EasyOCR | Лучшая open-source альтернатива Tesseract |
-| **Backend** | FastAPI | Быстрый, современный Python web framework |
-| **Interface** | Telegram Bot | Простой UX без веб-разработки |
-| **Deployment** | Docker | Воспроизводимая среда, простое развёртывание |
+4. **Verify deployment:**
+   ```bash
+   curl http://localhost:8003/health
+   ```
+   
+   Expected response:
+   ```json
+   {"status": "ok", "sam2_large": true}
+   ```
 
-### Архитектура:
-```
-Telegram Bot
-    ↓
-[Hybrid Service:8003] ← основной сервис
-    ↓
-Hough Transform → стены
-SAM2 + OCR → комнаты (не используется в текущей версии)
-```
+For detailed installation instructions, see [QUICKSTART.md](QUICKSTART.md) and [DOCKER.md](DOCKER.md).
 
----
+## Usage
 
-## Текущие ограничения и проблемы
+### Via Telegram Bot
 
-### Критические проблемы точности:
+1. Open your Telegram bot
+2. Send `/start` to initialize
+3. Send a floor plan image (JPG/PNG)
+4. Wait 10-20 seconds for processing
+5. Receive:
+   - Visualization image with detected walls
+   - JSON file with coordinates
 
-1. **Внутренние стены часто пропускаются**
-   - Hough Transform плохо справляется с разрывами в линиях
-   - Низкоконтрастные стены на планах БТИ не детектируются
-   - **Точность: ~60-70%** на реальных планах
+### Via REST API
 
-2. **Ложные детекции**
-   - Мебель, текст, штриховка распознаются как стены
-   - Нет фильтрации по контексту
-   - Много "мусорных" коротких сегментов
+**Endpoint:** `POST http://localhost:8003/detect`
 
-3. **Коробочные модели не работают**
-   - **SAM2** сегментирует мебель вместо комнат
-   - **EasyOCR** распознаёт только 50-60% текста на планах
-   - Pretrained веса не заточены под архитектурные чертежи
-
-4. **Геометрические артефакты**
-   - Snap to axis искажает непрямые углы
-   - Слияние сегментов иногда объединяет разные стены
-   - Нет учёта толщины стен
-
-### Технические ограничения:
-
-- **Производительность:** 10-20 секунд на план (CPU only)
-- **Память:** требуется минимум 4GB RAM
-- **Масштаб:** нет автоматической калибровки (пиксели, не метры)
-
----
-
-## Что требуется для Production
-
-### 1. Дообучение моделей (критично!)
-
-**Проблема:** Коробочные решения дают точность ~60-70%, что недостаточно.
-
-**Решение:**
-```
-Собрать датасет:
-  • 500-1000 размеченных планов
-  • Разметка: стены (линии), комнаты (полигоны), двери, окна
-  • Источники: БТИ, архитектурные бюро, CAD экспорты
-
-Fine-tune модели:
-  • YOLO v8/v11 для детекции стен + дверей/окон
-  • UNet/DeepLab для сегментации комнат
-  • Custom OCR для размеров (на базе CRNN)
-
-Ожидаемый результат:
-  • Точность детекции стен: 90-95%
-  • F1-score для комнат: >0.85
+**Request:**
+```bash
+curl -X POST "http://localhost:8003/detect" \
+  -F "file=@floor_plan.png"
 ```
 
-### 2. Улучшение Pipeline
-
-**Текущие проблемы → Решения:**
-
-| Проблема | Решение | Приоритет |
-|----------|---------|-----------|
-| Разрывы в стенах | Graph-based connectivity + morphological closing | Высокий |
-| Мебель как стены | Контекстная фильтрация через classifier | Высокий |
-| Толщина стен | Морфологическая эрозия + расширение | Средний |
-| Кривые линии | Полиномиальная аппроксимация вместо snap-to-axis | Средний |
-| Масштаб | OCR размеров + автокалибровка | Низкий |
-
-### 3. Расширение функционала
-
-```python
-# Текущая версия (v1.0)
+**Response:**
+```json
 {
-  "walls": [...],  # есть, но неточно
-  "rooms": [],     # отключено (низкая точность)
-  "doors": [],     # не реализовано
-  "windows": []    # не реализовано
-}
-
-# Целевая версия (v2.0)
-{
-  "walls": [...],      # точность 90-95%
-  "rooms": [...],      # площади + типы помещений
-  "doors": [...],      # позиции + типы
-  "windows": [...],    # позиции + размеры
-  "dimensions": [...], # размеры из OCR
-  "scale": 0.05        # метры/пиксель
+  "meta": {"source": "floor_plan.png"},
+  "walls": [...],
+  "rooms": [...]
 }
 ```
 
----
+## Current Limitations
 
-## Следующая итерация (v2.0)
+### Accuracy Issues
 
-### Краткосрочные задачи (1-2 месяца):
+- **Wall Detection Accuracy**: ~60-70% on real-world floor plans
+  - Interior walls with breaks are often missed
+  - Low-contrast walls on technical drawings may not be detected
+  - False positives from furniture, text, and hatching patterns
 
-1. **Сбор и разметка датасета**
-   - 500+ планов различных типов
-   - Разметка в CVAT/LabelBox
-   - Аугментация данных (rotation, noise, blur)
+- **Room Segmentation**: Experimental, not production-ready
+  - SAM 2.1 may segment furniture instead of rooms
+  - OCR-based method requires clear area labels on plans
+  - Limited accuracy without fine-tuned models
 
-2. **Fine-tuning YOLO v11**
-   - Обучение на датасете стен
-   - Transfer learning от COCO
-   - Ожидаемая точность: 90%+
+- **Geometric Artifacts**:
+  - Snap-to-axis may distort non-orthogonal angles
+  - Segment merging can incorrectly combine different walls
+  - Wall thickness is not considered
 
-3. **Улучшение фильтрации**
-   - Правила на основе геометрии
-   - ML-классификатор "стена/не стена"
-   - Post-processing через графовые алгоритмы
+### Technical Constraints
 
-### Среднесрочные (3-6 месяцев):
+- **Performance**: 10-20 seconds per plan (CPU-only mode)
+- **Memory**: Requires minimum 4GB RAM, 8GB recommended
+- **Scale**: No automatic calibration (output in pixels, not meters)
+- **Model Size**: SAM 2.1 Large requires ~224MB download on first run
 
-4. **Сегментация комнат**
-   - Custom UNet на датасете
-   - Интеграция с OCR для типов помещений
-   - Watershed от стен как границ
+## Roadmap
 
-5. **Детекция дверей/окон**
-   - Отдельный YOLO детектор
-   - Классификация типов
-   - Привязка к стенам
+### Version 2.0 (Planned)
 
-6. **API и веб-интерфейс**
-   - REST API с документацией
-   - Web UI для визуализации
-   - Batch обработка
+**Short-term (1-2 months):**
+- Dataset collection and annotation (500+ floor plans)
+- Fine-tuning YOLO v11 for wall detection (target: 90%+ accuracy)
+- Improved filtering with ML-based wall/not-wall classifier
+- Graph-based post-processing for wall connectivity
 
-### Долгосрочные (6-12 месяцев):
+**Medium-term (3-6 months):**
+- Custom UNet for room segmentation
+- Door and window detection (separate YOLO detector)
+- REST API with OpenAPI documentation
+- Web-based visualization interface
+- Batch processing support
 
-7. **3D реконструкция**
-   - Высота помещений из планов + разрезов
-   - Экспорт в 3D форматы (OBJ, FBX)
+**Long-term (6-12 months):**
+- 3D reconstruction from plans and sections
+- Export to CAD formats (DXF, DWG)
+- AR/VR integration for plan visualization
+- Automatic scale calibration via OCR dimensions
 
-8. **AR/VR интеграция**
-   - Просмотр распознанных планов в AR
-   - Virtual walkthrough
+### Production Requirements
 
----
+To achieve production-ready accuracy (>90%), the following is required:
 
-## Запуск
+1. **Dataset**: 500-1000 annotated floor plans with:
+   - Wall lines (polylines)
+   - Room polygons
+   - Door and window positions
+   - Dimension labels
+
+2. **Model Fine-tuning**:
+   - YOLO v8/v11 for wall/door/window detection
+   - UNet/DeepLab for room segmentation
+   - Custom CRNN-based OCR for dimensions
+
+3. **Pipeline Improvements**:
+   - Graph-based connectivity analysis
+   - Context-aware filtering
+   - Wall thickness estimation
+   - Scale auto-calibration
+
+## API Documentation
+
+### Services
+
+| Service | Port | Endpoint | Description |
+|---------|------|----------|-------------|
+| Hybrid Service | 8003 | `/detect` | Main recognition endpoint |
+| Hybrid Service | 8003 | `/health` | Health check |
+| OCR Service | 8002 | `/ocr` | Text recognition |
+| Cleanup Service | 8001 | `/clean` | Image preprocessing |
+
+### Health Check
 
 ```bash
-# 1. Создайте settings_secret.json с токеном TG бота
-echo '{"telegram_bot_token":"YOUR_TOKEN","hybrid_url":"http://localhost:8003/detect"}' > settings_secret.json
-
-# 2. Запустите Docker
-docker-compose up -d
-
-# 3. Отправьте план в Telegram бота
+curl http://localhost:8003/health
 ```
 
-Подробнее: [DOCKER.md](DOCKER.md) | [QUICKSTART.md](QUICKSTART.md)
+Response:
+```json
+{
+  "status": "ok",
+  "sam2_large": true
+}
+```
+
+## Development
+
+### Project Structure
+
+```
+room-detector/
+├── services/
+│   ├── hybrid_service.py      # Main recognition service
+│   ├── ocr_service.py          # OCR service (EasyOCR)
+│   └── cleanup_service.py      # Image preprocessing
+├── tg_bot.py                   # Telegram bot interface
+├── settings.py                 # Configuration management
+├── Dockerfile                  # Container definition
+├── docker-compose.yml          # Service orchestration
+├── requirements.txt            # Python dependencies
+└── README.md                   # This file
+```
+
+### Running Locally (Without Docker)
+
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Set up environment:**
+   ```bash
+   export TELEGRAM_BOT_TOKEN="your_token"
+   export HYBRID_URL="http://localhost:8003/detect"
+   ```
+
+3. **Start services:**
+   ```bash
+   # Terminal 1: Hybrid Service
+   uvicorn services.hybrid_service:app --port 8003
+   
+   # Terminal 2: OCR Service
+   uvicorn services.ocr_service:app --port 8002
+   
+   # Terminal 3: Cleanup Service
+   uvicorn services.cleanup_service:app --port 8001
+   
+   # Terminal 4: Telegram Bot
+   python tg_bot.py
+   ```
+
+## Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is provided as-is for research and development purposes.
+
+## Citation
+
+If you use this project in your research, please cite:
+
+```bibtex
+@software{floor_plan_recognition,
+  title = {Floor Plan Recognition Service},
+  author = {Strekolovsky, Maksim},
+  year = {2025},
+  url = {https://github.com/yourusername/room-detector}
+}
+```
+
+## Acknowledgments
+
+- **SAM 2.1** by Meta AI for segmentation capabilities
+- **EasyOCR** for text recognition
+- **OpenCV** community for computer vision tools
+- **FastAPI** for the excellent web framework
+
+## Support
+
+For issues, questions, or contributions:
+- Open an issue on GitHub
+- Check [QUICKSTART.md](QUICKSTART.md) for setup help
+- Review [DOCKER.md](DOCKER.md) for deployment details
+
+---
+
+**Status**: Prototype / Proof of Concept  
+**Version**: 1.0  
+**Last Updated**: December 2025

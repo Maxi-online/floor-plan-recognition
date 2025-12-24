@@ -40,14 +40,10 @@ env/
 Thumbs.db
 
 # Project specific
-# settings_secret.json - теперь в репозитории
 *.log
 *.tmp
 
-# Model weights (опционально, можно коммитить или использовать Git LFS)
 *.pt
-sam2.1_l.pt
-yolov8n.pt
 models/*.pt
 
 # Test data
@@ -73,4 +69,7 @@ htmlcov/
 *.bak
 *.swp
 *~
+
+# Secret files
+settings_secret.json
 
