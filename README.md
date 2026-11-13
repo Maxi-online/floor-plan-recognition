@@ -29,6 +29,25 @@ The implementation uses OpenCV, scikit-image, FastAPI, EasyOCR and an optional
 SAM 2.1 model loaded through Ultralytics. These are third-party components; this
 repository supplies the application pipeline and integration around them.
 
+## Processing details
+
+The wall path is deliberately inspectable, with its parameters visible in
+[hybrid_service.py](services/hybrid_service.py):
+
+| Stage | Current implementation |
+|---|---|
+| Local contrast | CLAHE, `clipLimit=3.0`, `tileGridSize=(8, 8)` |
+| Edge-preserving smoothing | Bilateral filter, `d=9`, `sigmaColor=75`, `sigmaSpace=75` |
+| Binarization | Intersection of Otsu and adaptive Gaussian thresholding; adaptive block size 21, C=10 |
+| Morphology | 3×3 rectangular kernel; closing then opening |
+| Wall candidates | Skeletonization and `HoughLinesP`; threshold 30, minimum line 20 px, maximum gap 35 px |
+| Geometry cleanup | Axis snapping, duplicate removal and collinear merging with 3°/50 px thresholds |
+
+Room experiments use numeric OCR labels as watershed seeds, then supplement sparse
+results with SAM candidates. A recognized area label is source text, not automatic
+pixel-to-metre calibration. These choices make both the useful assumptions and
+their failure cases visible.
+
 ## Current API contract
 
 | Service | Port | Endpoint | Purpose |
@@ -42,6 +61,19 @@ repository supplies the application pipeline and integration around them.
 rooms internally, but the current `/detect` response returns `meta` and `walls`.
 It does not currently export those room polygons. Coordinates are in pixels;
 physical scale and CAD reconstruction are not established by this API.
+
+The following illustrates the current response shape; coordinates are an example,
+not a measured recognition result:
+
+```json
+{
+  "meta": {"source": "plan.png"},
+  "walls": [
+    {"id": "w1", "points": [[100, 200], [500, 200]]},
+    {"id": "w2", "points": [[500, 200], [500, 600]]}
+  ]
+}
+```
 
 ## Run the service
 
@@ -72,6 +104,22 @@ and [DOCKER.md](DOCKER.md). Source entry points are
 [hybrid_service.py](services/hybrid_service.py),
 [tg_bot.py](tg_bot.py) and [settings.py](settings.py).
 
+## Local service development
+
+Create a virtual environment and install [requirements.txt](requirements.txt).
+With that environment active, use separate terminals for the three services:
+
+```bash
+python -m uvicorn services.hybrid_service:app --port 8003
+python -m uvicorn services.ocr_service:app --port 8002
+python -m uvicorn services.cleanup_service:app --port 8001
+```
+
+After configuring `settings_secret.json`, start the Telegram client in another
+terminal with `python tg_bot.py`. It accepts a plan image and returns the
+recognition result/visualization. Model availability can be checked through
+`GET /health`; HTTP upload testing is available through `/docs`.
+
 ## Design trade-offs and validation
 
 Hough-based walls are explainable and inexpensive relative to a learned detector,
@@ -85,8 +133,21 @@ wall precision/recall, room IoU, connectivity errors and latency on a versioned
 set of drawings. Fine-tuning, door/window recognition, scale calibration and CAD
 export remain possible extensions rather than delivered capabilities.
 
-## Project status and attribution
+## Author and citation
 
-Research/application prototype. OpenCV, EasyOCR, Ultralytics and SAM retain their
-own licenses and attribution. No standalone project license file is currently
-included in this repository.
+Maksim Strekolovsky (Maxi-online), as credited in the original project documentation.
+
+```bibtex
+@software{floor_plan_recognition,
+  title = {Floor Plan Recognition Service},
+  author = {Strekolovsky, Maksim},
+  year = {2025},
+  url = {https://github.com/Maxi-online/floor-plan-recognition}
+}
+```
+
+## Project status, license and attribution
+
+Research/application prototype, provided as-is for research and development as
+stated in the original project documentation. OpenCV, EasyOCR, Ultralytics and SAM
+retain their own licenses and attribution.
