@@ -151,3 +151,11 @@ Maksim Strekolovsky (Maxi-online), as credited in the original project documenta
 Research/application prototype, provided as-is for research and development as
 stated in the original project documentation. OpenCV, EasyOCR, Ultralytics and SAM
 retain their own licenses and attribution.
+
+## Конфигурация, приватность и воспроизведение
+
+Скопируйте `settings_secret.example.json` в игнорируемый `settings_secret.json` и задайте только собственные значения. Этот файл используется локально; перед публикацией изображений удалите адреса, подписи владельцев и другую персональную информацию. JSON-ответ `/process_hybrid` содержит `meta` и `walls`; вычисление комнат внутри pipeline не гарантирует их наличие в ответе.
+
+Секреты храните в игнорируемых локальных файлах или переменных окружения. Безопасные примеры содержат только структуру настройки. Не передавайте секреты в командной строке и не добавляйте заполненные `.env`, приватные ключи, базы данных и логи в коммиты.
+
+Workflow [Secret scan](.github/workflows/secret-scan.yml) проверяет текущие файлы и входящие коммиты Gitleaks 8.30.1 с редактированием значений в выводе. Это проверка на известные шаблоны, а не подтверждение отсутствия всех возможных утечек. Удаление значения из HEAD не очищает старую историю; порядок действий описан в [SECURITY.md](SECURITY.md).
